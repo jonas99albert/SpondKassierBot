@@ -22,7 +22,7 @@ import csv
 import io
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from tabulate import tabulate
@@ -94,7 +94,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/katalog\\_add `Name` `Betrag` – Neue Strafe\n"
         "/katalog\\_del `Name` – Strafe entfernen\n\n"
         "🔄 *Spond*\n"
-        "/spond\\_sync – Spond abgleichen\n"
+        "/spond\\_sync `01.01.2026` – Spond abgleichen ab Datum\n"
         "/spond\\_gruppen – Gruppen anzeigen\n\n"
         "📊 *Sonstiges*\n"
         "/spieler – Alle Spieler\n"
@@ -479,7 +479,7 @@ async def cmd_spieler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /spond_sync ──────────────────────────────────────────────────────
 
 async def cmd_spond_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Synchronisiert mit Spond."""
+    """Synchronisiert mit Spond. Optional: /spond_sync 01.01.2026"""
     if not is_admin(update):
         await update.message.reply_text("⛔ Nur für Admins.")
         return
@@ -491,7 +491,28 @@ async def cmd_spond_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = await update.message.reply_text("🔄 Synchronisiere mit Spond...")
+    # Startdatum parsen (optional)
+    date_arg = " ".join(context.args) if context.args else ""
+    if date_arg:
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                from_date = datetime.strptime(date_arg, fmt).replace(tzinfo=None)
+                break
+            except ValueError:
+                continue
+        else:
+            await update.message.reply_text(
+                "❌ Datumsformat nicht erkannt.\n"
+                "Beispiele: `/spond_sync 01.01.2026` oder `/spond_sync 2026-01-01`",
+                parse_mode="Markdown",
+            )
+            return
+        date_label = date_arg
+    else:
+        from_date = datetime.now() - timedelta(days=14)
+        date_label = f"letzten 14 Tage"
+
+    msg = await update.message.reply_text(f"🔄 Synchronisiere mit Spond ({date_label})...")
 
     try:
         result = await sync_spond(
@@ -499,11 +520,14 @@ async def cmd_spond_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
             password=SPOND_PASSWORD,
             group_id=SPOND_GROUP_ID,
             penalty_amount=NO_REPLY_PENALTY,
+            from_date=from_date,
         )
 
         text = (
             f"✅ <b>Spond-Sync abgeschlossen</b>\n\n"
+            f"📆 Zeitraum: {date_label}\n"
             f"📅 Events geprüft: {result['events_checked']}\n"
+            f"⏭️ Übersprungen (abgelaufen): {result['skipped_expired']}\n"
             f"⚠️ Neue Strafen: {result['new_penalties']}\n"
         )
 

@@ -9,52 +9,39 @@ import database as db
 logger = logging.getLogger(__name__)
 
 
-def _extract_ids(responses: dict, key: str) -> set:
-    """Extrahiert Member-IDs sicher aus einer Response-Liste.
-    
-    Die Spond API kann verschiedene Formate liefern:
-    - Liste von Strings: ["id1", "id2"]
-    - Liste von Dicts: [{"id": "id1"}, {"id": "id2"}]
-    """
-    items = responses.get(key, [])
-    if not items:
-        return set()
-    
-    result = set()
-    for item in items:
-        if isinstance(item, str):
-            result.add(item)
-        elif isinstance(item, dict):
-            if "id" in item:
-                result.add(item["id"])
-    return result
-
-
-async def sync_spond(email: str, password: str, group_id: str, penalty_amount: float) -> dict:
+async def sync_spond(email: str, password: str, group_id: str, penalty_amount: float, from_date: datetime = None) -> dict:
     """
     Synchronisiert mit Spond und bestraft Nicht-Antworter.
 
+    Args:
+        from_date: Ab wann Events geprüft werden (default: letzte 14 Tage)
+
     Returns:
-        dict mit keys: events_checked, new_penalties, players_synced, details
+        dict mit keys: events_checked, new_penalties, players_synced, skipped_expired, details
     """
     s = spond.Spond(username=email, password=password)
     result = {
         "events_checked": 0,
         "new_penalties": 0,
         "players_synced": 0,
+        "skipped_expired": 0,
         "details": [],
     }
 
     try:
-        # Vergangene Events der letzten 14 Tage abrufen
+        # Zeitraum bestimmen
         now = datetime.now(timezone.utc)
-        min_date = now - timedelta(days=14)
+        if from_date:
+            min_date = from_date.replace(tzinfo=timezone.utc)
+        else:
+            min_date = now - timedelta(days=14)
 
         events = await s.get_events(
             group_id=group_id,
             min_start=min_date,
             max_end=now,
             include_scheduled=True,
+            max_events=500,
         )
 
         # Gruppenmitglieder für Namenszuordnung
@@ -63,38 +50,29 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
 
         result["events_checked"] = len(events)
 
-        # Debug: Erstes Event loggen um Struktur zu sehen
-        if events:
-            first = events[0]
-            logger.info(f"Debug Event-Keys: {list(first.keys())}")
-            resp = first.get("responses", {})
-            logger.info(f"Debug Responses-Keys: {list(resp.keys())}")
-            for rkey in resp:
-                val = resp[rkey]
-                if isinstance(val, list) and val:
-                    logger.info(f"Debug responses['{rkey}'][0] type={type(val[0]).__name__}, value={val[0]}")
-
         for event in events:
             event_id = event["id"]
             event_name = event.get("heading", "Unbekannt")
             start_time = event.get("startTimestamp", "")
 
-            # Responses auswerten (robust: String oder Dict)
+            # Nur Events bestrafen, deren Deadline noch nicht abgelaufen ist
+            if event.get("expired", False):
+                result["skipped_expired"] += 1
+                logger.info(f"Übersprungen (abgelaufen): {event_name}")
+                continue
+
+            # unansweredIds direkt von Spond nutzen
             responses = event.get("responses", {})
-            accepted_ids = _extract_ids(responses, "acceptedIds")
-            declined_ids = _extract_ids(responses, "declinedIds")
-            waiting_ids = _extract_ids(responses, "waitinglistIds")
-            unconfirmed_ids = _extract_ids(responses, "unconfirmedIds")
+            unanswered_ids = responses.get("unansweredIds", [])
 
-            responded_ids = accepted_ids | declined_ids | waiting_ids | unconfirmed_ids
+            if not unanswered_ids:
+                continue
 
-            # Alle Gruppenmitglieder gelten als eingeladen
-            invited_member_ids = set(members.keys())
-
-            # Nicht-Antworter finden
-            no_reply_ids = invited_member_ids - responded_ids
-
-            for member_id in no_reply_ids:
+            for member_id in unanswered_ids:
+                # member_id kann String oder Dict sein
+                if isinstance(member_id, dict):
+                    member_id = member_id.get("id", "")
+                
                 member = members.get(member_id)
                 if not member:
                     continue
