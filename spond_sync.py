@@ -1,9 +1,33 @@
 """Spond-Synchronisation: Events abrufen und Nicht-Antworter bestrafen."""
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from spond import spond
 import database as db
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_ids(responses: dict, key: str) -> set:
+    """Extrahiert Member-IDs sicher aus einer Response-Liste.
+    
+    Die Spond API kann verschiedene Formate liefern:
+    - Liste von Strings: ["id1", "id2"]
+    - Liste von Dicts: [{"id": "id1"}, {"id": "id2"}]
+    """
+    items = responses.get(key, [])
+    if not items:
+        return set()
+    
+    result = set()
+    for item in items:
+        if isinstance(item, str):
+            result.add(item)
+        elif isinstance(item, dict):
+            if "id" in item:
+                result.add(item["id"])
+    return result
 
 
 async def sync_spond(email: str, password: str, group_id: str, penalty_amount: float) -> dict:
@@ -39,35 +63,33 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
 
         result["events_checked"] = len(events)
 
+        # Debug: Erstes Event loggen um Struktur zu sehen
+        if events:
+            first = events[0]
+            logger.info(f"Debug Event-Keys: {list(first.keys())}")
+            resp = first.get("responses", {})
+            logger.info(f"Debug Responses-Keys: {list(resp.keys())}")
+            for rkey in resp:
+                val = resp[rkey]
+                if isinstance(val, list) and val:
+                    logger.info(f"Debug responses['{rkey}'][0] type={type(val[0]).__name__}, value={val[0]}")
+
         for event in events:
             event_id = event["id"]
             event_name = event.get("heading", "Unbekannt")
             start_time = event.get("startTimestamp", "")
 
-            # Responses auswerten
+            # Responses auswerten (robust: String oder Dict)
             responses = event.get("responses", {})
-            accepted_ids = {r["id"] for r in responses.get("acceptedIds", [])}
-            declined_ids = {r["id"] for r in responses.get("declinedIds", [])}
-            waiting_ids = {r["id"] for r in responses.get("waitinglistIds", [])}
+            accepted_ids = _extract_ids(responses, "acceptedIds")
+            declined_ids = _extract_ids(responses, "declinedIds")
+            waiting_ids = _extract_ids(responses, "waitinglistIds")
+            unconfirmed_ids = _extract_ids(responses, "unconfirmedIds")
 
-            responded_ids = accepted_ids | declined_ids | waiting_ids
+            responded_ids = accepted_ids | declined_ids | waiting_ids | unconfirmed_ids
 
-            # Alle eingeladenen Spieler
-            recipients = event.get("recipients", {})
-            invited_member_ids = set()
-
-            # Gruppen-Einladungen
-            if group_id in [g.get("id") for g in recipients.get("group", {}).get("members", [])]:
-                invited_member_ids = set(members.keys())
-            else:
-                # Direkte Mitglieder-IDs aus den Recipients extrahieren
-                for g in recipients.get("group", []) if isinstance(recipients.get("group"), list) else [recipients.get("group", {})]:
-                    for m in g.get("members", []):
-                        invited_member_ids.add(m.get("id", m) if isinstance(m, dict) else m)
-
-            # Fallback: Wenn keine invited IDs gefunden, alle Mitglieder nehmen
-            if not invited_member_ids:
-                invited_member_ids = set(members.keys())
+            # Alle Gruppenmitglieder gelten als eingeladen
+            invited_member_ids = set(members.keys())
 
             # Nicht-Antworter finden
             no_reply_ids = invited_member_ids - responded_ids
