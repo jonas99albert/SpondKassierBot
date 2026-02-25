@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from spond import Spond
+from spond import spond
 import database as db
 
 
@@ -13,7 +13,7 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
     Returns:
         dict mit keys: events_checked, new_penalties, players_synced, details
     """
-    s = Spond(username=email, password=password)
+    s = spond.Spond(username=email, password=password)
     result = {
         "events_checked": 0,
         "new_penalties": 0,
@@ -109,7 +109,7 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
 
 async def list_spond_groups(email: str, password: str) -> list[dict]:
     """Listet alle Spond-Gruppen auf (zum Finden der Group-ID)."""
-    s = Spond(username=email, password=password)
+    s = spond.Spond(username=email, password=password)
     try:
         groups = await s.get_groups()
         return [{"id": g["id"], "name": g.get("name", "?")} for g in groups]
@@ -119,7 +119,7 @@ async def list_spond_groups(email: str, password: str) -> list[dict]:
 
 async def get_spond_members(email: str, password: str, group_id: str) -> list[dict]:
     """Gibt alle Mitglieder einer Spond-Gruppe zurück."""
-    s = Spond(username=email, password=password)
+    s = spond.Spond(username=email, password=password)
     try:
         group = await s.get_group(group_id)
         members = []
