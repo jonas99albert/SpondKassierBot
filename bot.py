@@ -527,6 +527,7 @@ async def cmd_spond_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"✅ <b>Spond-Sync abgeschlossen</b>\n\n"
             f"📆 Zeitraum: {date_label}\n"
+            f"👥 Spieler synchronisiert: {result['players_synced']}\n"
             f"📅 Events geprüft: {result['events_checked']}\n"
             f"⏭️ Übersprungen (Deadline offen): {result['skipped_expired']}\n"
             f"⚠️ Neue Strafen: {result['new_penalties']}\n"

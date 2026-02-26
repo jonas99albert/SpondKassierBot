@@ -48,6 +48,15 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
         group = await s.get_group(group_id)
         members = {m["id"]: m for m in group.get("members", [])}
 
+        # ALLE Mitglieder in DB anlegen/aktualisieren
+        for member_id, member in members.items():
+            first_name = member.get("firstName", "")
+            last_name = member.get("lastName", "")
+            full_name = f"{first_name} {last_name}".strip()
+            if full_name:
+                db.get_or_create_player(full_name, spond_id=member_id)
+                result["players_synced"] += 1
+
         result["events_checked"] = len(events)
 
         for event in events:
@@ -91,7 +100,6 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
 
                 # Spieler in DB anlegen/finden
                 player = db.get_or_create_player(full_name, spond_id=member_id)
-                result["players_synced"] += 1
 
                 # Prüfen ob Strafe schon existiert
                 if not db.penalty_exists(player["id"], event_id):
