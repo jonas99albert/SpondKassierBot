@@ -88,6 +88,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/strafen – Übersicht offene Strafen\n"
         "/strafe – Strafe vergeben\n"
         "/bezahlt `Name` – Als bezahlt markieren\n"
+        "/loeschen `Name` – Einzelne Strafe löschen\n"
         "/detail `Name` – Einzelstrafen anzeigen\n\n"
         "📋 *Katalog*\n"
         "/katalog – Strafenkatalog anzeigen\n"
@@ -565,6 +566,62 @@ async def cmd_spond_gruppen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Fehler: {str(e)[:200]}")
 
 
+# ── /loeschen ─────────────────────────────────────────────────────────
+
+async def cmd_loeschen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Einzelne Strafe löschen: /loeschen Spielername"""
+    if not is_admin(update):
+        await update.message.reply_text("⛔ Nur Admins dürfen Strafen löschen.")
+        return
+
+    name = " ".join(context.args) if context.args else ""
+    if not name:
+        await update.message.reply_text("❌ Bitte Spielername angeben: `/loeschen Max Müller`", parse_mode="Markdown")
+        return
+
+    player = db.find_player(name)
+    if not player:
+        await update.message.reply_text(f"❌ Spieler '{name}' nicht gefunden.")
+        return
+
+    penalties = db.get_penalties(player_id=player["id"], only_unpaid=True)
+    if not penalties:
+        await update.message.reply_text(f"✅ {player['name']} hat keine offenen Strafen.")
+        return
+
+    # Inline-Buttons für jede einzelne Strafe
+    buttons = []
+    for p in penalties:
+        date = p["created_at"][:10] if p["created_at"] else "?"
+        label = f"❌ {date} | {p['reason']} | {format_euro(p['amount'])}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"del_{p['id']}")])
+
+    buttons.append([InlineKeyboardButton("⬅️ Abbrechen", callback_data="del_cancel")])
+
+    await update.message.reply_text(
+        f"🗑️ Welche Strafe von <b>{player['name']}</b> löschen?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="HTML",
+    )
+
+
+async def delete_penalty_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback für Strafen-Löschung."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "del_cancel":
+        await query.edit_message_text("⬅️ Abgebrochen.")
+        return
+
+    penalty_id = int(query.data.replace("del_", ""))
+
+    if db.delete_penalty(penalty_id):
+        await query.edit_message_text("✅ Strafe gelöscht!")
+    else:
+        await query.edit_message_text("❌ Strafe nicht gefunden (evtl. schon gelöscht).")
+
+
 # ── /export ──────────────────────────────────────────────────────────
 
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -642,6 +699,8 @@ def main():
     app.add_handler(CommandHandler("spieler", cmd_spieler))
     app.add_handler(CommandHandler("spond_sync", cmd_spond_sync))
     app.add_handler(CommandHandler("spond_gruppen", cmd_spond_gruppen))
+    app.add_handler(CommandHandler("loeschen", cmd_loeschen))
+    app.add_handler(CallbackQueryHandler(delete_penalty_callback, pattern=r"^del_"))
     app.add_handler(CommandHandler("export", cmd_export))
 
     print("🤖 Strafenkasse Bot gestartet!")

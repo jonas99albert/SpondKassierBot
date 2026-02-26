@@ -238,6 +238,15 @@ def get_total_open() -> float:
     return row["total"]
 
 
+def delete_penalty(penalty_id: int) -> bool:
+    """Löscht eine einzelne Strafe."""
+    conn = get_connection()
+    cursor = conn.execute("DELETE FROM penalties WHERE id = ?", (penalty_id,))
+    conn.commit()
+    conn.close()
+    return cursor.rowcount > 0
+
+
 def penalty_exists(player_id: int, event_id: str) -> bool:
     """Prüft ob für einen Spieler + Event bereits eine Strafe existiert."""
     conn = get_connection()
