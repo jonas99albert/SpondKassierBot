@@ -55,6 +55,11 @@ async def sync_spond(email: str, password: str, group_id: str, penalty_amount: f
             event_name = event.get("heading", "Unbekannt")
             start_time = event.get("startTimestamp", "")
 
+            # Abgesagte Events ignorieren
+            if event.get("cancelled", False):
+                logger.info(f"Übersprungen (abgesagt): {event_name}")
+                continue
+
             # Nur Events bestrafen, deren Deadline ABGELAUFEN ist
             if not event.get("expired", False):
                 logger.info(f"Übersprungen (Deadline noch offen): {event_name}")
